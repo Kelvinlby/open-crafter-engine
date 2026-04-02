@@ -1189,6 +1189,7 @@ dependencies = [
  "axum",
  "clap",
  "nvml-wrapper",
+ "serde",
  "serde_json",
  "serenity",
  "sysinfo",
