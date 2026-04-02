@@ -86,10 +86,6 @@ impl AppConfig {
 impl ConfigState {
     /// Save current config to disk.
     pub fn save(&self) -> Result<(), String> {
-        if let Some(parent) = self.config_path.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| format!("failed to create settings dir: {e}"))?;
-        }
         let json = serde_json::to_string_pretty(&self.config)
             .map_err(|e| format!("failed to serialize config: {e}"))?;
         fs::write(&self.config_path, json)
@@ -118,9 +114,9 @@ fn detect_devices() -> Vec<String> {
 
 /// Load config from disk, validate, and return shared state.
 /// `exe_dir` is the directory containing the executable — config is stored at
-/// `<exe_dir>/settings/config.json`.
+/// `<exe_dir>/../engine-config.json`.
 pub fn load(exe_dir: &Path) -> SharedConfig {
-    let config_path = exe_dir.join("settings").join("config.json");
+    let config_path = exe_dir.parent().unwrap_or(exe_dir).join("engine-config.json");
     let available_devices = detect_devices();
 
     let config = match fs::read_to_string(&config_path) {
