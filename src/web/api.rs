@@ -1,72 +1,176 @@
-use axum::{routing::get, Router};
+use axum::extract::State;
+use axum::http::StatusCode;
+use axum::{routing::{get, post}, Json, Router};
 
-use super::models::{DiscordPageData, HyperparamConfig, ModelPageData, RuntimePageData, SkillToolItem, UsageInfo};
-use crate::utils::{gpu_utilization, ram_utilization, vram_utilization};
+use super::models::{
+    DiscordPageData, HyperparamConfig, ModelOption, ModelPageData, RuntimePageData,
+    SaveDiscordConfigRequest, SaveHyperparamRequest, SaveModelConfigRequest,
+    SaveRuntimeConfigRequest, ScanModelsRequest, SkillToolItem, UsageInfo,
+};
+use crate::settings::{self, SharedConfig};
+use crate::utils::{gpu_utilization, ram_utilization, validate_model_folder, vram_utilization};
 
 /// GET /api/model
-async fn get_model() -> axum::Json<ModelPageData> {
-    axum::Json(ModelPageData {
-        model_path: "/models/llama-3-8b-instruct".to_string(),
-        selected_model: "llama-3-8b-instruct".to_string(),
-        available_models: vec![
-            "llama-3-8b-instruct".to_string(),
-            "llama-3-70b".to_string(),
-            "mistral-7b-v0.3".to_string(),
-            "qwen2-7b".to_string(),
-            "phi-3-mini".to_string(),
-        ],
-        hyperparams: vec![
-            HyperparamConfig {
-                id: "temperature".to_string(),
-                title: "Temperature".to_string(),
-                value: 0.7,
-                min: 0.0,
-                max: 2.0,
-                step: 0.05,
-                default_value: 0.7,
-            },
-            HyperparamConfig {
-                id: "top_p".to_string(),
-                title: "Top P".to_string(),
-                value: 0.9,
-                min: 0.0,
-                max: 1.0,
-                step: 0.01,
-                default_value: 0.9,
-            },
-            HyperparamConfig {
-                id: "top_k".to_string(),
-                title: "Top K".to_string(),
-                value: 40.0,
-                min: 1.0,
-                max: 100.0,
-                step: 1.0,
-                default_value: 40.0,
-            },
-            HyperparamConfig {
-                id: "max_tokens".to_string(),
-                title: "Max Tokens".to_string(),
-                value: 2048.0,
-                min: 64.0,
-                max: 8192.0,
-                step: 64.0,
-                default_value: 2048.0,
-            },
-            HyperparamConfig {
-                id: "repeat_penalty".to_string(),
-                title: "Repeat Penalty".to_string(),
-                value: 1.1,
-                min: 1.0,
-                max: 2.0,
-                step: 0.05,
-                default_value: 1.1,
-            },
-        ],
+async fn get_model(State(config): State<SharedConfig>) -> Json<ModelPageData> {
+    let state = config.lock().unwrap();
+    let model_path = state.config.model_path.clone();
+    let selected_model = state.config.selected_model.clone();
+    drop(state);
+
+    // Scan for available models at the stored path
+    let available_models = scan_model_dir(&model_path);
+
+    // Load hyperparams from the selected model's metadata.json
+    let hyperparams = load_hyperparams(&selected_model);
+
+    Json(ModelPageData {
+        model_path,
+        selected_model,
+        available_models,
+        hyperparams,
     })
 }
 
+/// Scan a directory for valid model subfolders.
+/// Returns ModelOption with `folder` as the full absolute path.
+fn scan_model_dir(base: &str) -> Vec<ModelOption> {
+    let base_path = std::path::Path::new(base);
+    let mut models = Vec::new();
+
+    let entries = match std::fs::read_dir(base_path) {
+        Ok(entries) => entries,
+        Err(_) => return models,
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() || !validate_model_folder(&path) {
+            continue;
+        }
+
+        let metadata_path = path.join("metadata.json");
+        let content = match std::fs::read_to_string(&metadata_path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        let json: serde_json::Value = match serde_json::from_str(&content) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        let model_name = match json.get("model_name").and_then(|v| v.as_str()) {
+            Some(name) => name.to_string(),
+            None => continue,
+        };
+
+        models.push(ModelOption {
+            folder: path.to_string_lossy().to_string(),
+            name: model_name,
+        });
+    }
+
+    models
+}
+
+/// Load hyperparameters from a model's metadata.json.
+/// `model_folder` is the full path to the model folder.
+fn load_hyperparams(model_folder: &str) -> Vec<HyperparamConfig> {
+    if model_folder.is_empty() {
+        return Vec::new();
+    }
+
+    let metadata_path = std::path::Path::new(model_folder).join("metadata.json");
+
+    let content = match std::fs::read_to_string(&metadata_path) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+
+    let json: serde_json::Value = match serde_json::from_str(&content) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+
+    let hyperparam = match json.get("hyperparam").and_then(|v| v.as_object()) {
+        Some(obj) => obj,
+        None => return Vec::new(),
+    };
+
+    let mut configs: Vec<HyperparamConfig> = Vec::new();
+    for (id, val) in hyperparam {
+        let current = val.get("current").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let default = val.get("default").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let min = val.get("min").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let max = val.get("max").and_then(|v| v.as_f64()).unwrap_or(1.0);
+        let step = val.get("step").and_then(|v| v.as_f64()).unwrap_or(0.01);
+
+        // Use the id as title with first letter capitalized and underscores replaced
+        let title = id
+            .replace('_', " ")
+            .split_whitespace()
+            .map(|w| {
+                let mut c = w.chars();
+                match c.next() {
+                    Some(f) => f.to_uppercase().to_string() + c.as_str(),
+                    None => String::new(),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        configs.push(HyperparamConfig {
+            id: id.clone(),
+            title,
+            value: current,
+            min,
+            max,
+            step,
+            default_value: default,
+        });
+    }
+
+    configs
+}
+
+/// POST /api/model/scan — scan a directory for valid model subfolders
+async fn scan_models(Json(body): Json<ScanModelsRequest>) -> Json<Vec<ModelOption>> {
+    Json(scan_model_dir(&body.model_path))
+}
+
+/// POST /api/model/save — save model path and selection to config
+async fn save_model_config(
+    State(config): State<SharedConfig>,
+    Json(body): Json<SaveModelConfigRequest>,
+) -> Result<Json<&'static str>, (StatusCode, String)> {
+    let mut state = config.lock().unwrap();
+    state.config.model_path = body.model_path;
+    state.config.selected_model = body.selected_model;
+    state.save().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(Json("ok"))
+}
+
+/// POST /api/model/hyperparam — save a hyperparameter value to the model's metadata.json
+async fn save_hyperparam(
+    State(config): State<SharedConfig>,
+    Json(body): Json<SaveHyperparamRequest>,
+) -> Result<Json<&'static str>, (StatusCode, String)> {
+    let state = config.lock().unwrap();
+    let selected_model = state.config.selected_model.clone();
+    drop(state);
+
+    if selected_model.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "no model selected".to_string()));
+    }
+
+    settings::save_model_hyperparam(&selected_model, &body.param_id, body.value)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
+    Ok(Json("ok"))
+}
+
 /// GET /api/runtime
-async fn get_runtime() -> axum::Json<RuntimePageData> {
+async fn get_runtime(State(config): State<SharedConfig>) -> Json<RuntimePageData> {
     // RAM
     let ram_pct = ram_utilization();
     let mut sys = sysinfo::System::new();
@@ -112,9 +216,15 @@ async fn get_runtime() -> axum::Json<RuntimePageData> {
     }
     available_devices.push("CPU".to_string());
 
-    let selected_device = available_devices.first().cloned().unwrap_or_else(|| "CPU".to_string());
+    // Use saved device selection, fall back to first available
+    let state = config.lock().unwrap();
+    let selected_device = if available_devices.contains(&state.config.inference_device) {
+        state.config.inference_device.clone()
+    } else {
+        available_devices.first().cloned().unwrap_or_else(|| "CPU".to_string())
+    };
 
-    axum::Json(RuntimePageData {
+    Json(RuntimePageData {
         ram: UsageInfo {
             label: "RAM".to_string(),
             value: ram_pct,
@@ -135,9 +245,20 @@ async fn get_runtime() -> axum::Json<RuntimePageData> {
     })
 }
 
+/// POST /api/runtime/save — save inference device selection
+async fn save_runtime_config(
+    State(config): State<SharedConfig>,
+    Json(body): Json<SaveRuntimeConfigRequest>,
+) -> Result<Json<&'static str>, (StatusCode, String)> {
+    let mut state = config.lock().unwrap();
+    state.config.inference_device = body.inference_device;
+    state.save().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(Json("ok"))
+}
+
 /// GET /api/skills
-async fn get_skills() -> axum::Json<Vec<SkillToolItem>> {
-    axum::Json(vec![
+async fn get_skills() -> Json<Vec<SkillToolItem>> {
+    Json(vec![
         SkillToolItem {
             id: "pathfinding".to_string(),
             title: "Pathfinding".to_string(),
@@ -172,8 +293,8 @@ async fn get_skills() -> axum::Json<Vec<SkillToolItem>> {
 }
 
 /// GET /api/tools
-async fn get_tools() -> axum::Json<Vec<SkillToolItem>> {
-    axum::Json(vec![
+async fn get_tools() -> Json<Vec<SkillToolItem>> {
+    Json(vec![
         SkillToolItem {
             id: "chat".to_string(),
             title: "Chat".to_string(),
@@ -202,20 +323,40 @@ async fn get_tools() -> axum::Json<Vec<SkillToolItem>> {
 }
 
 /// GET /api/discord
-async fn get_discord() -> axum::Json<DiscordPageData> {
-    axum::Json(DiscordPageData {
-        bot_token: String::new(),
-        admin_role_id: String::new(),
-        channel_ids: vec!["1234567890".to_string(), "0987654321".to_string()],
+async fn get_discord(State(config): State<SharedConfig>) -> Json<DiscordPageData> {
+    let state = config.lock().unwrap();
+    Json(DiscordPageData {
+        bot_token: state.config.discord.bot_token.clone(),
+        admin_role_id: state.config.discord.admin_role_id.clone(),
+        channel_ids: state.config.discord.channel_ids.clone(),
     })
 }
 
+/// POST /api/discord/save — save discord configuration
+async fn save_discord_config(
+    State(config): State<SharedConfig>,
+    Json(body): Json<SaveDiscordConfigRequest>,
+) -> Result<Json<&'static str>, (StatusCode, String)> {
+    let mut state = config.lock().unwrap();
+    state.config.discord.bot_token = body.bot_token;
+    state.config.discord.admin_role_id = body.admin_role_id;
+    state.config.discord.channel_ids = body.channel_ids;
+    state.save().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(Json("ok"))
+}
+
 /// Build the API router with all /api/* routes
-pub fn router() -> Router {
+pub fn router(config: SharedConfig) -> Router {
     Router::new()
         .route("/model", get(get_model))
+        .route("/model/scan", post(scan_models))
+        .route("/model/save", post(save_model_config))
+        .route("/model/hyperparam", post(save_hyperparam))
         .route("/runtime", get(get_runtime))
+        .route("/runtime/save", post(save_runtime_config))
         .route("/skills", get(get_skills))
         .route("/tools", get(get_tools))
         .route("/discord", get(get_discord))
+        .route("/discord/save", post(save_discord_config))
+        .with_state(config)
 }

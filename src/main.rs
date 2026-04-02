@@ -1,3 +1,4 @@
+mod settings;
 mod utils;
 mod web;
 
@@ -30,5 +31,7 @@ async fn main() {
         std::process::exit(1);
     }
 
-    web::start_server(&args.host, args.port, web_ui_dir).await;
+    let config = settings::load(&exe_dir);
+
+    web::start_server(&args.host, args.port, web_ui_dir, config).await;
 }

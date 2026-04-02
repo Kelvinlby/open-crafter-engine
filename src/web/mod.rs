@@ -4,14 +4,16 @@ use std::path::PathBuf;
 use axum::Router;
 use tower_http::services::{ServeDir, ServeFile};
 
-mod api;
-mod models;
+use crate::settings::SharedConfig;
 
-pub async fn start_server(host: &str, port: u16, web_ui_dir: PathBuf) {
+mod api;
+pub mod models;
+
+pub async fn start_server(host: &str, port: u16, web_ui_dir: PathBuf, config: SharedConfig) {
     let index = web_ui_dir.join("index.html");
 
     let app = Router::new()
-        .nest("/api", api::router())
+        .nest("/api", api::router(config))
         .fallback_service(ServeDir::new(&web_ui_dir).fallback(ServeFile::new(&index)));
 
     let addr: SocketAddr = format!("{host}:{port}")

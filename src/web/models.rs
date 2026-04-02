@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -12,13 +12,26 @@ pub struct HyperparamConfig {
     pub default_value: f64,
 }
 
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelOption {
+    pub folder: String,
+    pub name: String,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelPageData {
     pub model_path: String,
     pub selected_model: String,
-    pub available_models: Vec<String>,
+    pub available_models: Vec<ModelOption>,
     pub hyperparams: Vec<HyperparamConfig>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanModelsRequest {
+    pub model_path: String,
 }
 
 #[derive(Serialize)]
@@ -51,6 +64,36 @@ pub struct SkillToolItem {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiscordPageData {
+    pub bot_token: String,
+    pub admin_role_id: String,
+    pub channel_ids: Vec<String>,
+}
+
+// --- Save request models ---
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveModelConfigRequest {
+    pub model_path: String,
+    pub selected_model: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveHyperparamRequest {
+    pub param_id: String,
+    pub value: f64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveRuntimeConfigRequest {
+    pub inference_device: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveDiscordConfigRequest {
     pub bot_token: String,
     pub admin_role_id: String,
     pub channel_ids: Vec<String>,
