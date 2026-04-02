@@ -1,3 +1,4 @@
+mod utils;
 mod web;
 
 use clap::Parser;
