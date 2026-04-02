@@ -3,7 +3,7 @@ use axum::http::StatusCode;
 use axum::{routing::{get, post}, Json, Router};
 
 use super::models::{
-    HyperparamConfig, ModelOption, ModelPageData, RuntimePageData,
+    DiscordPageData, HyperparamConfig, ModelOption, ModelPageData, RuntimePageData,
     SaveDiscordConfigRequest, SaveHyperparamRequest, SaveModelConfigRequest,
     SaveRuntimeConfigRequest, ScanModelsRequest, SkillToolItem, UsageInfo,
 };
@@ -322,6 +322,16 @@ async fn get_tools() -> Json<Vec<SkillToolItem>> {
     ])
 }
 
+/// GET /api/discord
+async fn get_discord(State(config): State<SharedConfig>) -> Json<DiscordPageData> {
+    let state = config.lock().unwrap();
+    Json(DiscordPageData {
+        bot_token: state.config.discord.bot_token.clone(),
+        admin_role_id: state.config.discord.admin_role_id.clone(),
+        channel_ids: state.config.discord.channel_ids.clone(),
+    })
+}
+
 /// POST /api/discord/save — save discord configuration
 async fn save_discord_config(
     State(config): State<SharedConfig>,
@@ -346,6 +356,7 @@ pub fn router(config: SharedConfig) -> Router {
         .route("/runtime/save", post(save_runtime_config))
         .route("/skills", get(get_skills))
         .route("/tools", get(get_tools))
+        .route("/discord", get(get_discord))
         .route("/discord/save", post(save_discord_config))
         .with_state(config)
 }

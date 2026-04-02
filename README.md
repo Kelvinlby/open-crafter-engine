@@ -201,6 +201,21 @@ Retrieve the list of available tools.
 
 ## Discord Configuration
 
+### GET `/api/discord`
+
+Retrieve the current Discord bot configuration.
+
+**Response:** `200 OK`
+```json
+{
+  "botToken": "*******",
+  "adminRoleId": "123456789012345678",
+  "channelIds": ["111111111111111111", "222222222222222222"]
+}
+```
+
+---
+
 ### POST `/api/discord/save`
 
 Save Discord bot configuration to the configuration file.
