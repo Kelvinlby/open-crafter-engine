@@ -5,6 +5,7 @@ use std::path::Path;
 #[derive(Deserialize)]
 struct HyperparamValue {
     default: serde_json::Value,
+    current: serde_json::Value,
     min: Option<serde_json::Value>,
     max: Option<serde_json::Value>,
 }
@@ -81,9 +82,12 @@ pub fn validate_model_folder<P: AsRef<Path>>(path: P) -> bool {
         Err(_) => return false,
     };
 
-    // Validate hyperparam values (default, min, max must be float, int, or null)
+    // Validate hyperparam values (default, current, min, max must be float, int, or null)
     for hyperparam in metadata.hyperparam.values() {
         if !is_valid_numeric_value(&hyperparam.default) {
+            return false;
+        }
+        if !is_valid_numeric_value(&hyperparam.current) {
             return false;
         }
         if let Some(min) = &hyperparam.min {
