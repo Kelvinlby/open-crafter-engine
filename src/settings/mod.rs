@@ -123,12 +123,12 @@ pub fn load(exe_dir: &Path) -> SharedConfig {
         Ok(content) => match serde_json::from_str::<AppConfig>(&content) {
             Ok(cfg) => cfg.validate(&available_devices),
             Err(e) => {
-                eprintln!("settings: config.json is malformed ({e}), using defaults");
+                eprintln!("settings: engine config is malformed ({e}), using defaults");
                 AppConfig::default_with_devices(&available_devices)
             }
         },
         Err(_) => {
-            println!("settings: no config.json found, creating defaults");
+            println!("settings: no engine config found, creating defaults");
             AppConfig::default_with_devices(&available_devices)
         }
     };
