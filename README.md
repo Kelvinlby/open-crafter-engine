@@ -209,8 +209,9 @@ Retrieve the current Discord bot configuration.
 ```json
 {
   "botToken": "*******",
-  "adminRoleId": "123456789012345678",
-  "channelIds": ["111111111111111111", "222222222222222222"]
+  "adminChannelId": "123456789012345678",
+  "logChannelId": "987654321098765432",
+  "userChannelIds": ["111111111111111111", "222222222222222222"]
 }
 ```
 
@@ -224,8 +225,9 @@ Save Discord bot configuration to the configuration file.
 ```json
 {
   "botToken": "your-bot-token",
-  "adminRoleId": "123456789012345678",
-  "channelIds": ["111111111111111111", "222222222222222222"]
+  "adminChannelId": "123456789012345678",
+  "logChannelId": "987654321098765432",
+  "userChannelIds": ["111111111111111111", "222222222222222222"]
 }
 ```
 
@@ -270,7 +272,7 @@ curl -X POST http://localhost:8080/api/runtime/save \
 # Save Discord config
 curl -X POST http://localhost:8080/api/discord/save \
   -H "Content-Type: application/json" \
-  -d '{"botToken": "token", "adminRoleId": "123", "channelIds": ["456"]}'
+  -d '{"botToken": "token", "adminChannelId": "123", "logChannelId": "789", "userChannelIds": ["456"]}'
 ```
 
 ### JavaScript (fetch) Example

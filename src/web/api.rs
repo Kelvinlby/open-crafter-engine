@@ -327,8 +327,9 @@ async fn get_discord(State(config): State<SharedConfig>) -> Json<DiscordPageData
     let state = config.lock().unwrap();
     Json(DiscordPageData {
         bot_token: state.config.discord.bot_token.clone(),
-        admin_role_id: state.config.discord.admin_role_id.clone(),
-        channel_ids: state.config.discord.channel_ids.clone(),
+        admin_channel_id: state.config.discord.admin_channel_id.clone(),
+        log_channel_id: state.config.discord.log_channel_id.clone(),
+        user_channel_ids: state.config.discord.user_channel_ids.clone(),
     })
 }
 
@@ -339,8 +340,9 @@ async fn save_discord_config(
 ) -> Result<Json<&'static str>, (StatusCode, String)> {
     let mut state = config.lock().unwrap();
     state.config.discord.bot_token = body.bot_token;
-    state.config.discord.admin_role_id = body.admin_role_id;
-    state.config.discord.channel_ids = body.channel_ids;
+    state.config.discord.admin_channel_id = body.admin_channel_id;
+    state.config.discord.log_channel_id = body.log_channel_id;
+    state.config.discord.user_channel_ids = body.user_channel_ids;
     state.save().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     Ok(Json("ok"))
 }

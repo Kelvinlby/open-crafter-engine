@@ -65,8 +65,9 @@ pub struct SkillToolItem {
 #[serde(rename_all = "camelCase")]
 pub struct DiscordPageData {
     pub bot_token: String,
-    pub admin_role_id: String,
-    pub channel_ids: Vec<String>,
+    pub admin_channel_id: String,
+    pub log_channel_id: String,
+    pub user_channel_ids: Vec<String>,
 }
 
 // --- Save request models ---
@@ -95,6 +96,7 @@ pub struct SaveRuntimeConfigRequest {
 #[serde(rename_all = "camelCase")]
 pub struct SaveDiscordConfigRequest {
     pub bot_token: String,
-    pub admin_role_id: String,
-    pub channel_ids: Vec<String>,
+    pub admin_channel_id: String,
+    pub log_channel_id: String,
+    pub user_channel_ids: Vec<String>,
 }

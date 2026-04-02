@@ -19,8 +19,9 @@ pub struct AppConfig {
 #[serde(rename_all = "camelCase")]
 pub struct DiscordConfig {
     pub bot_token: String,
-    pub admin_role_id: String,
-    pub channel_ids: Vec<String>,
+    pub admin_channel_id: String,
+    pub log_channel_id: String,
+    pub user_channel_ids: Vec<String>,
 }
 
 /// Shared config state wrapping the config and its file path.
@@ -50,8 +51,9 @@ impl AppConfig {
             inference_device: device,
             discord: DiscordConfig {
                 bot_token: String::new(),
-                admin_role_id: String::new(),
-                channel_ids: Vec::new(),
+                admin_channel_id: String::new(),
+                log_channel_id: String::new(),
+                user_channel_ids: Vec::new(),
             },
         }
     }
