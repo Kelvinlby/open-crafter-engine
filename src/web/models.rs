@@ -61,13 +61,19 @@ pub struct SkillToolItem {
     pub description: String,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiKey {
+    pub name: String,
+    pub key: String,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DiscordPageData {
-    pub bot_token: String,
-    pub admin_channel_id: String,
-    pub log_channel_id: String,
-    pub user_channel_ids: Vec<String>,
+pub struct ApiConfigData {
+    pub accepted_ip_range: String,
+    pub port: String,
+    pub api_keys: Vec<ApiKey>,
 }
 
 // --- Save request models ---
@@ -94,9 +100,14 @@ pub struct SaveRuntimeConfigRequest {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SaveDiscordConfigRequest {
-    pub bot_token: String,
-    pub admin_channel_id: String,
-    pub log_channel_id: String,
-    pub user_channel_ids: Vec<String>,
+pub struct SaveApiConfigRequest {
+    pub accepted_ip_range: String,
+    pub port: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddApiKeyRequest {
+    pub name: String,
+    pub key: String,
 }

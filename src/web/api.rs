@@ -1,10 +1,10 @@
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::{routing::{get, post}, Json, Router};
+use axum::{routing::{delete, get, post}, Json, Router};
 
 use super::models::{
-    DiscordPageData, HyperparamConfig, ModelOption, ModelPageData, RuntimePageData,
-    SaveDiscordConfigRequest, SaveHyperparamRequest, SaveModelConfigRequest,
+    AddApiKeyRequest, ApiConfigData, ApiKey, HyperparamConfig, ModelOption, ModelPageData,
+    RuntimePageData, SaveApiConfigRequest, SaveHyperparamRequest, SaveModelConfigRequest,
     SaveRuntimeConfigRequest, ScanModelsRequest, SkillToolItem, UsageInfo,
 };
 use crate::settings::{self, SharedConfig};
@@ -322,27 +322,57 @@ async fn get_tools() -> Json<Vec<SkillToolItem>> {
     ])
 }
 
-/// GET /api/discord
-async fn get_discord(State(config): State<SharedConfig>) -> Json<DiscordPageData> {
+/// GET /api/config — return current API configuration
+async fn get_config(State(config): State<SharedConfig>) -> Json<ApiConfigData> {
     let state = config.lock().unwrap();
-    Json(DiscordPageData {
-        bot_token: state.config.discord.bot_token.clone(),
-        admin_channel_id: state.config.discord.admin_channel_id.clone(),
-        log_channel_id: state.config.discord.log_channel_id.clone(),
-        user_channel_ids: state.config.discord.user_channel_ids.clone(),
+    let api_config = &state.config.api_config;
+    Json(ApiConfigData {
+        accepted_ip_range: api_config.accepted_ip_range.clone(),
+        port: api_config.port.clone(),
+        api_keys: api_config.api_keys.iter().map(|k| ApiKey {
+            name: k.name.clone(),
+            key: k.key.clone(),
+        }).collect(),
     })
 }
 
-/// POST /api/discord/save — save discord configuration
-async fn save_discord_config(
+/// POST /api/config/save — update acceptedIpRange and port
+async fn save_config(
     State(config): State<SharedConfig>,
-    Json(body): Json<SaveDiscordConfigRequest>,
+    Json(body): Json<SaveApiConfigRequest>,
 ) -> Result<Json<&'static str>, (StatusCode, String)> {
     let mut state = config.lock().unwrap();
-    state.config.discord.bot_token = body.bot_token;
-    state.config.discord.admin_channel_id = body.admin_channel_id;
-    state.config.discord.log_channel_id = body.log_channel_id;
-    state.config.discord.user_channel_ids = body.user_channel_ids;
+    state.config.api_config.accepted_ip_range = body.accepted_ip_range;
+    state.config.api_config.port = body.port;
+    state.save().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(Json("ok"))
+}
+
+/// POST /api/config/api-key — append a new API key
+async fn add_api_key(
+    State(config): State<SharedConfig>,
+    Json(body): Json<AddApiKeyRequest>,
+) -> Result<Json<&'static str>, (StatusCode, String)> {
+    let mut state = config.lock().unwrap();
+    state.config.api_config.api_keys.push(crate::settings::ApiKey {
+        name: body.name,
+        key: body.key,
+    });
+    state.save().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(Json("ok"))
+}
+
+/// DELETE /api/config/api-key/:index — remove API key at zero-based index
+async fn delete_api_key(
+    State(config): State<SharedConfig>,
+    Path(index): Path<usize>,
+) -> Result<Json<&'static str>, (StatusCode, String)> {
+    let mut state = config.lock().unwrap();
+    let keys = &mut state.config.api_config.api_keys;
+    if index >= keys.len() {
+        return Err((StatusCode::BAD_REQUEST, format!("index {index} out of range")));
+    }
+    keys.remove(index);
     state.save().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     Ok(Json("ok"))
 }
@@ -358,7 +388,9 @@ pub fn router(config: SharedConfig) -> Router {
         .route("/runtime/save", post(save_runtime_config))
         .route("/skills", get(get_skills))
         .route("/tools", get(get_tools))
-        .route("/discord", get(get_discord))
-        .route("/discord/save", post(save_discord_config))
+        .route("/config", get(get_config))
+        .route("/config/save", post(save_config))
+        .route("/config/api-key", post(add_api_key))
+        .route("/config/api-key/{index}", delete(delete_api_key))
         .with_state(config)
 }

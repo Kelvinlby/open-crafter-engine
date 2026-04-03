@@ -12,16 +12,22 @@ pub struct AppConfig {
     pub model_path: String,
     pub selected_model: String,
     pub inference_device: String,
-    pub discord: DiscordConfig,
+    pub api_config: ApiConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DiscordConfig {
-    pub bot_token: String,
-    pub admin_channel_id: String,
-    pub log_channel_id: String,
-    pub user_channel_ids: Vec<String>,
+pub struct ApiKey {
+    pub name: String,
+    pub key: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiConfig {
+    pub accepted_ip_range: String,
+    pub port: String,
+    pub api_keys: Vec<ApiKey>,
 }
 
 /// Shared config state wrapping the config and its file path.
@@ -49,11 +55,10 @@ impl AppConfig {
             model_path: home,
             selected_model: String::new(),
             inference_device: device,
-            discord: DiscordConfig {
-                bot_token: String::new(),
-                admin_channel_id: String::new(),
-                log_channel_id: String::new(),
-                user_channel_ids: Vec::new(),
+            api_config: ApiConfig {
+                accepted_ip_range: "0.0.0.0/0".to_string(),
+                port: "8080".to_string(),
+                api_keys: Vec::new(),
             },
         }
     }

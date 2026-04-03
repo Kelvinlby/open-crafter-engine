@@ -1,4 +1,3 @@
-mod discord;
 mod settings;
 mod utils;
 mod web;
@@ -33,8 +32,6 @@ async fn main() {
     }
 
     let config = settings::load(&exe_dir);
-
-    discord::maybe_start_bot(config.clone());
 
     web::start_server(&args.host, args.port, web_ui_dir, config).await;
 }
