@@ -199,35 +199,34 @@ Retrieve the list of available tools.
 
 ---
 
-## Discord Configuration
+## API Configuration
 
-### GET `/api/discord`
+### GET `/api/config`
 
-Retrieve the current Discord bot configuration.
+Retrieve the current API configuration.
 
 **Response:** `200 OK`
 ```json
 {
-  "botToken": "*******",
-  "adminChannelId": "123456789012345678",
-  "logChannelId": "987654321098765432",
-  "userChannelIds": ["111111111111111111", "222222222222222222"]
+  "acceptedIpRange": "0.0.0.0/0",
+  "port": "8080",
+  "apiKeys": [
+    { "name": "dev-key", "key": "a1b2c3d4..." }
+  ]
 }
 ```
 
 ---
 
-### POST `/api/discord/save`
+### POST `/api/config/save`
 
-Save Discord bot configuration to the configuration file.
+Save the accepted IP range and port to the configuration file.
 
 **Request:**
 ```json
 {
-  "botToken": "your-bot-token",
-  "adminChannelId": "123456789012345678",
-  "logChannelId": "987654321098765432",
-  "userChannelIds": ["111111111111111111", "222222222222222222"]
+  "acceptedIpRange": "192.168.1.0/24",
+  "port": "8080"
 }
 ```
 
@@ -235,6 +234,40 @@ Save Discord bot configuration to the configuration file.
 ```
 "ok"
 ```
+
+---
+
+### POST `/api/config/api-key`
+
+Add a new API key. The key value should be generated client-side (e.g. a 32-byte random hex string).
+
+**Request:**
+```json
+{
+  "name": "my-integration",
+  "key": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
+}
+```
+
+**Response:** `200 OK`
+```
+"ok"
+```
+
+---
+
+### DELETE `/api/config/api-key/{index}`
+
+Remove the API key at the given zero-based index in the stored keys array.
+
+**URL parameter:** `index` — integer, zero-based position in the `apiKeys` array.
+
+**Response:** `200 OK`
+```
+"ok"
+```
+
+**Error:** `400 Bad Request` if the index is out of range.
 
 ---
 
@@ -269,10 +302,21 @@ curl -X POST http://localhost:8080/api/runtime/save \
   -H "Content-Type: application/json" \
   -d '{"inferenceDevice": "CUDA:0 (NVIDIA GeForce RTX 3080)"}'
 
-# Save Discord config
-curl -X POST http://localhost:8080/api/discord/save \
+# Get API configuration
+curl http://localhost:8080/api/config
+
+# Save IP range and port
+curl -X POST http://localhost:8080/api/config/save \
   -H "Content-Type: application/json" \
-  -d '{"botToken": "token", "adminChannelId": "123", "logChannelId": "789", "userChannelIds": ["456"]}'
+  -d '{"acceptedIpRange": "192.168.1.0/24", "port": "8080"}'
+
+# Add an API key
+curl -X POST http://localhost:8080/api/config/api-key \
+  -H "Content-Type: application/json" \
+  -d '{"name": "my-integration", "key": "a1b2c3d4e5f6..."}'
+
+# Delete the first API key
+curl -X DELETE http://localhost:8080/api/config/api-key/0
 ```
 
 ### JavaScript (fetch) Example
@@ -298,7 +342,7 @@ if (response.ok) {
 ## Notes
 
 - All POST endpoints expect `Content-Type: application/json` header.
-- All successful POST operations return the string `"ok"`.
+- All successful POST and DELETE operations return the string `"ok"`.
 - Configuration changes are persisted to the engine's config file.
 - Hyperparameter changes are written to the selected model's `metadata.json`.
 
