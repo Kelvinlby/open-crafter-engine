@@ -5,7 +5,7 @@ use axum::{
     response::Response,
 };
 use ipnet::IpNet;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 
 use crate::settings::SharedConfig;
 
@@ -25,7 +25,12 @@ pub async fn ip_filter_middleware(
             .unwrap_or_else(|_| "0.0.0.0/0".parse().unwrap())
     };
 
-    if cidr.contains(&addr.ip()) {
+    let client_ip = match addr.ip() {
+        IpAddr::V6(v6) => v6.to_ipv4_mapped().map(IpAddr::V4).unwrap_or(IpAddr::V6(v6)),
+        ip => ip,
+    };
+
+    if cidr.contains(&client_ip) {
         Ok(next.run(request).await)
     } else {
         Err(StatusCode::FORBIDDEN)

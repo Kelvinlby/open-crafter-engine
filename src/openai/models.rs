@@ -1,5 +1,33 @@
 use serde::{Deserialize, Serialize};
 
+// --- Model Endpoints ---
+
+#[derive(Serialize)]
+pub struct ModelList {
+    pub object: &'static str,
+    pub data: Vec<Model>,
+}
+
+#[derive(Serialize)]
+pub struct Model {
+    pub id: String,
+    pub object: &'static str,
+    pub created: i64,
+    pub owned_by: &'static str,
+}
+
+#[derive(Serialize)]
+pub struct ModelDetail {
+    pub id: String,
+    pub object: &'static str,
+    pub created: i64,
+    pub owned_by: &'static str,
+    pub model_name: Option<String>,
+    pub model_version: Option<String>,
+}
+
+// --- Chat Completion Endpoints ---
+
 // --- Request ---
 
 #[derive(Deserialize)]

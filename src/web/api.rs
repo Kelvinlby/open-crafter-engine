@@ -181,8 +181,10 @@ async fn get_runtime(State(state): State<AppState>) -> Json<RuntimePageData> {
     let used_ram = sys.used_memory() as f64 / (1024.0_f64.powi(3));
     let ram_detail = format!("{:.1} / {:.1} GB", used_ram, total_ram);
 
+    let nvml_instance = nvml_wrapper::Nvml::init().ok();
+
     let vram_pct = vram_utilization();
-    let vram_detail = if let Ok(nvml) = nvml_wrapper::Nvml::init() {
+    let vram_detail = if let Some(nvml) = &nvml_instance {
         if let Ok(device) = nvml.device_by_index(0) {
             if let Ok(mem) = device.memory_info() {
                 let total_vram = mem.total as f64 / (1024.0_f64.powi(3));
@@ -202,7 +204,7 @@ async fn get_runtime(State(state): State<AppState>) -> Json<RuntimePageData> {
     let gpu_detail = format!("{:.0}% utilization", gpu_pct);
 
     let mut available_devices: Vec<String> = Vec::new();
-    if let Ok(nvml) = nvml_wrapper::Nvml::init() {
+    if let Some(nvml) = &nvml_instance {
         if let Ok(count) = nvml.device_count() {
             for i in 0..count {
                 if let Ok(device) = nvml.device_by_index(i) {
@@ -398,6 +400,24 @@ async fn delete_api_key(
     Ok(Json("ok"))
 }
 
+async fn load_model() -> Result<Json<&'static str>, (StatusCode, String)> {
+    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+    if rand::random::<bool>() {
+        Ok(Json("ok"))
+    } else {
+        Err((StatusCode::INTERNAL_SERVER_ERROR, "Failed to load model".to_string()))
+    }
+}
+
+async fn unload_model() -> Result<Json<&'static str>, (StatusCode, String)> {
+    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+    if rand::random::<bool>() {
+        Ok(Json("ok"))
+    } else {
+        Err((StatusCode::INTERNAL_SERVER_ERROR, "Failed to unload model".to_string()))
+    }
+}
+
 /// Build the API router with all /api/* routes
 pub fn router(config: SharedConfig, openai_server: SharedApiServer) -> Router {
     let app_state = AppState { config, openai_server };
@@ -406,6 +426,8 @@ pub fn router(config: SharedConfig, openai_server: SharedApiServer) -> Router {
         .route("/model/scan", post(scan_models))
         .route("/model/save", post(save_model_config))
         .route("/model/hyperparam", post(save_hyperparam))
+        .route("/model/load", post(load_model))
+        .route("/model/unload", post(unload_model))
         .route("/runtime", get(get_runtime))
         .route("/runtime/save", post(save_runtime_config))
         .route("/skills", get(get_skills))

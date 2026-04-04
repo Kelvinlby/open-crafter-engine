@@ -1,11 +1,11 @@
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
-use axum::{routing::post, Router};
+use axum::{routing::get, routing::post, Router};
 
 use crate::settings::SharedConfig;
 
-use super::handlers::chat_completions;
+use super::handlers::{chat_completions, list_models, retrieve_model};
 use super::middleware::{auth_middleware, ip_filter_middleware};
 
 pub type SharedApiServer = Arc<Mutex<Option<tokio::task::AbortHandle>>>;
@@ -31,7 +31,7 @@ pub async fn start_openai_server(config: SharedConfig, handle: SharedApiServer) 
     }
 
     // 3. Bind TcpListener before spawning so errors surface synchronously
-    let addr: SocketAddr = format!("0.0.0.0:{port}").parse().unwrap();
+    let addr: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
     let listener = match tokio::net::TcpListener::bind(addr).await {
         Ok(l) => l,
         Err(e) => {
@@ -40,10 +40,12 @@ pub async fn start_openai_server(config: SharedConfig, handle: SharedApiServer) 
         }
     };
 
-    println!("OpenAI API server listening at http://0.0.0.0:{port}");
+    println!("OpenAI API server listening at http://127.0.0.1:{port}");
 
     // 4. Build router — ip_filter is last layer so it runs first on incoming requests
     let app = Router::new()
+        .route("/v1/models", get(list_models))
+        .route("/v1/models/{model_id}", get(retrieve_model))
         .route("/v1/chat/completions", post(chat_completions))
         .layer(axum::middleware::from_fn_with_state(
             config.clone(),
