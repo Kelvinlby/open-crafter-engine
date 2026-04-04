@@ -1,6 +1,9 @@
+mod openai;
 mod settings;
 mod utils;
 mod web;
+
+use std::sync::{Arc, Mutex};
 
 use clap::Parser;
 
@@ -33,5 +36,8 @@ async fn main() {
 
     let config = settings::load(&exe_dir);
 
-    web::start_server(&args.host, args.port, web_ui_dir, config).await;
+    let openai_handle: openai::SharedApiServer = Arc::new(Mutex::new(None));
+    openai::start_openai_server(config.clone(), openai_handle.clone()).await;
+
+    web::start_server(&args.host, args.port, web_ui_dir, config, openai_handle).await;
 }

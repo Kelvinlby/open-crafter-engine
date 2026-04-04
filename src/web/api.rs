@@ -7,20 +7,25 @@ use super::models::{
     RuntimePageData, SaveApiConfigRequest, SaveHyperparamRequest, SaveModelConfigRequest,
     SaveRuntimeConfigRequest, ScanModelsRequest, SkillToolItem, UsageInfo,
 };
+use crate::openai::{self, SharedApiServer};
 use crate::settings::{self, SharedConfig};
 use crate::utils::{gpu_utilization, ram_utilization, validate_model_folder, vram_utilization};
 
+#[derive(Clone)]
+pub struct AppState {
+    pub config: SharedConfig,
+    pub openai_server: SharedApiServer,
+}
+
 /// GET /api/model
-async fn get_model(State(config): State<SharedConfig>) -> Json<ModelPageData> {
-    let state = config.lock().unwrap();
-    let model_path = state.config.model_path.clone();
-    let selected_model = state.config.selected_model.clone();
-    drop(state);
+async fn get_model(State(state): State<AppState>) -> Json<ModelPageData> {
+    let config = &state.config;
+    let cfg = config.lock().unwrap();
+    let model_path = cfg.config.model_path.clone();
+    let selected_model = cfg.config.selected_model.clone();
+    drop(cfg);
 
-    // Scan for available models at the stored path
     let available_models = scan_model_dir(&model_path);
-
-    // Load hyperparams from the selected model's metadata.json
     let hyperparams = load_hyperparams(&selected_model);
 
     Json(ModelPageData {
@@ -32,7 +37,6 @@ async fn get_model(State(config): State<SharedConfig>) -> Json<ModelPageData> {
 }
 
 /// Scan a directory for valid model subfolders.
-/// Returns ModelOption with `folder` as the full absolute path.
 fn scan_model_dir(base: &str) -> Vec<ModelOption> {
     let base_path = std::path::Path::new(base);
     let mut models = Vec::new();
@@ -60,7 +64,7 @@ fn scan_model_dir(base: &str) -> Vec<ModelOption> {
         };
 
         let model_name = match json.get("model_name").and_then(|v| v.as_str()) {
-            Some(name) => name.to_string(),
+            Some(v) => v.to_string(),
             None => continue,
         };
 
@@ -74,7 +78,6 @@ fn scan_model_dir(base: &str) -> Vec<ModelOption> {
 }
 
 /// Load hyperparameters from a model's metadata.json.
-/// `model_folder` is the full path to the model folder.
 fn load_hyperparams(model_folder: &str) -> Vec<HyperparamConfig> {
     if model_folder.is_empty() {
         return Vec::new();
@@ -93,19 +96,18 @@ fn load_hyperparams(model_folder: &str) -> Vec<HyperparamConfig> {
     };
 
     let hyperparam = match json.get("hyperparam").and_then(|v| v.as_object()) {
-        Some(obj) => obj,
+        Some(obj) => obj.clone(),
         None => return Vec::new(),
     };
 
     let mut configs: Vec<HyperparamConfig> = Vec::new();
-    for (id, val) in hyperparam {
+    for (id, val) in &hyperparam {
         let current = val.get("current").and_then(|v| v.as_f64()).unwrap_or(0.0);
         let default = val.get("default").and_then(|v| v.as_f64()).unwrap_or(0.0);
         let min = val.get("min").and_then(|v| v.as_f64()).unwrap_or(0.0);
         let max = val.get("max").and_then(|v| v.as_f64()).unwrap_or(1.0);
         let step = val.get("step").and_then(|v| v.as_f64()).unwrap_or(0.01);
 
-        // Use the id as title with first letter capitalized and underscores replaced
         let title = id
             .replace('_', " ")
             .split_whitespace()
@@ -140,24 +142,25 @@ async fn scan_models(Json(body): Json<ScanModelsRequest>) -> Json<Vec<ModelOptio
 
 /// POST /api/model/save — save model path and selection to config
 async fn save_model_config(
-    State(config): State<SharedConfig>,
+    State(state): State<AppState>,
     Json(body): Json<SaveModelConfigRequest>,
 ) -> Result<Json<&'static str>, (StatusCode, String)> {
-    let mut state = config.lock().unwrap();
-    state.config.model_path = body.model_path;
-    state.config.selected_model = body.selected_model;
-    state.save().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let mut cfg = state.config.lock().unwrap();
+    cfg.config.model_path = body.model_path;
+    cfg.config.selected_model = body.selected_model;
+    cfg.save().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     Ok(Json("ok"))
 }
 
 /// POST /api/model/hyperparam — save a hyperparameter value to the model's metadata.json
 async fn save_hyperparam(
-    State(config): State<SharedConfig>,
+    State(state): State<AppState>,
     Json(body): Json<SaveHyperparamRequest>,
 ) -> Result<Json<&'static str>, (StatusCode, String)> {
-    let state = config.lock().unwrap();
-    let selected_model = state.config.selected_model.clone();
-    drop(state);
+    let selected_model = {
+        let cfg = state.config.lock().unwrap();
+        cfg.config.selected_model.clone()
+    };
 
     if selected_model.is_empty() {
         return Err((StatusCode::BAD_REQUEST, "no model selected".to_string()));
@@ -170,8 +173,7 @@ async fn save_hyperparam(
 }
 
 /// GET /api/runtime
-async fn get_runtime(State(config): State<SharedConfig>) -> Json<RuntimePageData> {
-    // RAM
+async fn get_runtime(State(state): State<AppState>) -> Json<RuntimePageData> {
     let ram_pct = ram_utilization();
     let mut sys = sysinfo::System::new();
     sys.refresh_memory();
@@ -179,7 +181,6 @@ async fn get_runtime(State(config): State<SharedConfig>) -> Json<RuntimePageData
     let used_ram = sys.used_memory() as f64 / (1024.0_f64.powi(3));
     let ram_detail = format!("{:.1} / {:.1} GB", used_ram, total_ram);
 
-    // VRAM
     let vram_pct = vram_utilization();
     let vram_detail = if let Ok(nvml) = nvml_wrapper::Nvml::init() {
         if let Ok(device) = nvml.device_by_index(0) {
@@ -197,11 +198,9 @@ async fn get_runtime(State(config): State<SharedConfig>) -> Json<RuntimePageData
         "N/A".to_string()
     };
 
-    // GPU
     let gpu_pct = gpu_utilization();
     let gpu_detail = format!("{:.0}% utilization", gpu_pct);
 
-    // Available devices
     let mut available_devices: Vec<String> = Vec::new();
     if let Ok(nvml) = nvml_wrapper::Nvml::init() {
         if let Ok(count) = nvml.device_count() {
@@ -216,10 +215,9 @@ async fn get_runtime(State(config): State<SharedConfig>) -> Json<RuntimePageData
     }
     available_devices.push("CPU".to_string());
 
-    // Use saved device selection, fall back to first available
-    let state = config.lock().unwrap();
-    let selected_device = if available_devices.contains(&state.config.inference_device) {
-        state.config.inference_device.clone()
+    let cfg = state.config.lock().unwrap();
+    let selected_device = if available_devices.contains(&cfg.config.inference_device) {
+        cfg.config.inference_device.clone()
     } else {
         available_devices.first().cloned().unwrap_or_else(|| "CPU".to_string())
     };
@@ -247,12 +245,12 @@ async fn get_runtime(State(config): State<SharedConfig>) -> Json<RuntimePageData
 
 /// POST /api/runtime/save — save inference device selection
 async fn save_runtime_config(
-    State(config): State<SharedConfig>,
+    State(state): State<AppState>,
     Json(body): Json<SaveRuntimeConfigRequest>,
 ) -> Result<Json<&'static str>, (StatusCode, String)> {
-    let mut state = config.lock().unwrap();
-    state.config.inference_device = body.inference_device;
-    state.save().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let mut cfg = state.config.lock().unwrap();
+    cfg.config.inference_device = body.inference_device;
+    cfg.save().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     Ok(Json("ok"))
 }
 
@@ -323,9 +321,9 @@ async fn get_tools() -> Json<Vec<SkillToolItem>> {
 }
 
 /// GET /api/config — return current API configuration
-async fn get_config(State(config): State<SharedConfig>) -> Json<ApiConfigData> {
-    let state = config.lock().unwrap();
-    let api_config = &state.config.api_config;
+async fn get_config(State(state): State<AppState>) -> Json<ApiConfigData> {
+    let cfg = state.config.lock().unwrap();
+    let api_config = &cfg.config.api_config;
     Json(ApiConfigData {
         accepted_ip_range: api_config.accepted_ip_range.clone(),
         port: api_config.port.clone(),
@@ -336,49 +334,73 @@ async fn get_config(State(config): State<SharedConfig>) -> Json<ApiConfigData> {
     })
 }
 
-/// POST /api/config/save — update acceptedIpRange and port
+fn validate_api_config(port: &str, cidr: &str) -> Result<(), String> {
+    let n: u16 = port
+        .parse()
+        .map_err(|_| format!("invalid port: '{port}' is not a number"))?;
+    if n == 0 {
+        return Err("port must be between 1 and 65535".to_string());
+    }
+    cidr.parse::<ipnet::IpNet>()
+        .map_err(|_| format!("invalid IP range: '{cidr}'"))?;
+    Ok(())
+}
+
+/// POST /api/config/save — validate, update acceptedIpRange and port, restart OpenAI server
 async fn save_config(
-    State(config): State<SharedConfig>,
+    State(state): State<AppState>,
     Json(body): Json<SaveApiConfigRequest>,
 ) -> Result<Json<&'static str>, (StatusCode, String)> {
-    let mut state = config.lock().unwrap();
-    state.config.api_config.accepted_ip_range = body.accepted_ip_range;
-    state.config.api_config.port = body.port;
-    state.save().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    // 1. Validate first — return 400 if invalid, do NOT touch config
+    validate_api_config(&body.port, &body.accepted_ip_range)
+        .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+
+    // 2. Update and save config (lock released before step 3 to avoid deadlock)
+    {
+        let mut cfg = state.config.lock().unwrap();
+        cfg.config.api_config.accepted_ip_range = body.accepted_ip_range;
+        cfg.config.api_config.port = body.port;
+        cfg.save().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    }
+
+    // 3. Restart the OpenAI API server on the new settings
+    openai::start_openai_server(state.config.clone(), state.openai_server.clone()).await;
+
     Ok(Json("ok"))
 }
 
 /// POST /api/config/api-key — append a new API key
 async fn add_api_key(
-    State(config): State<SharedConfig>,
+    State(state): State<AppState>,
     Json(body): Json<AddApiKeyRequest>,
 ) -> Result<Json<&'static str>, (StatusCode, String)> {
-    let mut state = config.lock().unwrap();
-    state.config.api_config.api_keys.push(crate::settings::ApiKey {
+    let mut cfg = state.config.lock().unwrap();
+    cfg.config.api_config.api_keys.push(crate::settings::ApiKey {
         name: body.name,
         key: body.key,
     });
-    state.save().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    cfg.save().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     Ok(Json("ok"))
 }
 
 /// DELETE /api/config/api-key/:index — remove API key at zero-based index
 async fn delete_api_key(
-    State(config): State<SharedConfig>,
+    State(state): State<AppState>,
     Path(index): Path<usize>,
 ) -> Result<Json<&'static str>, (StatusCode, String)> {
-    let mut state = config.lock().unwrap();
-    let keys = &mut state.config.api_config.api_keys;
+    let mut cfg = state.config.lock().unwrap();
+    let keys = &mut cfg.config.api_config.api_keys;
     if index >= keys.len() {
         return Err((StatusCode::BAD_REQUEST, format!("index {index} out of range")));
     }
     keys.remove(index);
-    state.save().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    cfg.save().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     Ok(Json("ok"))
 }
 
 /// Build the API router with all /api/* routes
-pub fn router(config: SharedConfig) -> Router {
+pub fn router(config: SharedConfig, openai_server: SharedApiServer) -> Router {
+    let app_state = AppState { config, openai_server };
     Router::new()
         .route("/model", get(get_model))
         .route("/model/scan", post(scan_models))
@@ -392,5 +414,5 @@ pub fn router(config: SharedConfig) -> Router {
         .route("/config/save", post(save_config))
         .route("/config/api-key", post(add_api_key))
         .route("/config/api-key/{index}", delete(delete_api_key))
-        .with_state(config)
+        .with_state(app_state)
 }
