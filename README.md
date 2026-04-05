@@ -20,7 +20,7 @@ Open Crafter has three components:
 
 The engine stores its configuration in `engine-config.json`, located one directory above the binary (`../engine-config.json` relative to the executable). The file is created with defaults on first run and can be updated at runtime via `POST /api/config/save` on the Control Panel (see below), which also restarts the OpenAI API server to apply the new settings.
 
-## `acceptedIpRange`
+### `acceptedIpRange`
 
 CIDR notation string controlling which client IPs are allowed to reach the OpenAI API.
 
@@ -33,11 +33,11 @@ CIDR notation string controlling which client IPs are allowed to reach the OpenA
 
 IPv4-mapped IPv6 addresses (e.g. `::ffff:192.168.1.5`) are automatically unwrapped before matching, so an IPv4 CIDR correctly matches clients connecting over a dual-stack socket.
 
-## `port`
+### `port`
 
 Integer string between `"1"` and `"65535"`. The OpenAI-compatible API server listens on this port. Default: `"8080"`. The Control Panel port is set separately via the `--port` CLI flag (default `6121`) and is not affected by this field.
 
-## `apiKeys`
+### `apiKeys`
 
 Array of `{ "name": string, "key": string }` objects. The `key` field is used as the Bearer token. Keys should be random hex strings — 64 hex characters (32 bytes) is recommended. Example entry:
 
@@ -125,7 +125,9 @@ Retrieve detailed information about a specific model.
 
 ### POST `/v1/chat/completions`
 
-Generate a response for the given conversation. Context is managed server-side, so only the current turn needs to be provided.
+Generate a response for the given conversation.
+
+> **Note:** LLM inference is not yet implemented. This endpoint currently returns a placeholder response regardless of the input.
 
 **Request:**
 ```json
@@ -369,6 +371,42 @@ Retrieve the list of available tools.
     "description": "Inspect and manage player inventory..."
   }
 ]
+```
+
+---
+
+### POST `/api/skills/{id}/toggle`
+
+Enable or disable a skill.
+
+**URL parameter:** `id` — The skill identifier (folder name).
+
+**Request:**
+```json
+{ "enabled": true }
+```
+
+**Response:** `200 OK`
+```
+"ok"
+```
+
+---
+
+### POST `/api/tools/{id}/toggle`
+
+Enable or disable a tool.
+
+**URL parameter:** `id` — The tool identifier (folder name).
+
+**Request:**
+```json
+{ "enabled": true }
+```
+
+**Response:** `200 OK`
+```
+"ok"
 ```
 
 ---
