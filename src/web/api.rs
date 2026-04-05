@@ -5,11 +5,11 @@ use axum::{routing::{delete, get, post}, Json, Router};
 use super::models::{
     AddApiKeyRequest, ApiConfigData, ApiKey, HyperparamConfig, ModelOption, ModelPageData,
     RuntimePageData, SaveApiConfigRequest, SaveHyperparamRequest, SaveModelConfigRequest,
-    SaveRuntimeConfigRequest, ScanModelsRequest, SkillToolItem, UsageInfo,
+    SaveRuntimeConfigRequest, ScanModelsRequest, SkillToolItem, ToggleRequest, UsageInfo,
 };
 use crate::openai::{self, SharedApiServer};
 use crate::settings::{self, SharedConfig};
-use crate::utils::{gpu_utilization, ram_utilization, validate_model_folder, vram_utilization};
+use crate::utils::validate_model_folder;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -20,7 +20,7 @@ pub struct AppState {
 /// GET /api/model
 async fn get_model(State(state): State<AppState>) -> Json<ModelPageData> {
     let config = &state.config;
-    let cfg = config.lock().unwrap();
+    let cfg = config.lock().unwrap_or_else(|e| e.into_inner());
     let model_path = cfg.config.model_path.clone();
     let selected_model = cfg.config.selected_model.clone();
     drop(cfg);
@@ -145,7 +145,7 @@ async fn save_model_config(
     State(state): State<AppState>,
     Json(body): Json<SaveModelConfigRequest>,
 ) -> Result<Json<&'static str>, (StatusCode, String)> {
-    let mut cfg = state.config.lock().unwrap();
+    let mut cfg = state.config.lock().unwrap_or_else(|e| e.into_inner());
     cfg.config.model_path = body.model_path;
     cfg.config.selected_model = body.selected_model;
     cfg.save().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
@@ -158,7 +158,7 @@ async fn save_hyperparam(
     Json(body): Json<SaveHyperparamRequest>,
 ) -> Result<Json<&'static str>, (StatusCode, String)> {
     let selected_model = {
-        let cfg = state.config.lock().unwrap();
+        let cfg = state.config.lock().unwrap_or_else(|e| e.into_inner());
         cfg.config.selected_model.clone()
     };
 
@@ -174,50 +174,58 @@ async fn save_hyperparam(
 
 /// GET /api/runtime
 async fn get_runtime(State(state): State<AppState>) -> Json<RuntimePageData> {
-    let ram_pct = ram_utilization();
     let mut sys = sysinfo::System::new();
     sys.refresh_memory();
-    let total_ram = sys.total_memory() as f64 / (1024.0_f64.powi(3));
-    let used_ram = sys.used_memory() as f64 / (1024.0_f64.powi(3));
+    let total_ram_bytes = sys.total_memory();
+    let used_ram_bytes = sys.used_memory();
+    let ram_pct = if total_ram_bytes > 0 {
+        (used_ram_bytes as f64 / total_ram_bytes as f64) * 100.0
+    } else {
+        0.0
+    };
+    let total_ram = total_ram_bytes as f64 / (1024.0_f64.powi(3));
+    let used_ram = used_ram_bytes as f64 / (1024.0_f64.powi(3));
     let ram_detail = format!("{:.1} / {:.1} GB", used_ram, total_ram);
 
     let nvml_instance = nvml_wrapper::Nvml::init().ok();
 
-    let vram_pct = vram_utilization();
-    let vram_detail = if let Some(nvml) = &nvml_instance {
-        if let Ok(device) = nvml.device_by_index(0) {
-            if let Ok(mem) = device.memory_info() {
-                let total_vram = mem.total as f64 / (1024.0_f64.powi(3));
-                let used_vram = mem.used as f64 / (1024.0_f64.powi(3));
-                format!("{:.1} / {:.1} GB", used_vram, total_vram)
-            } else {
-                "N/A".to_string()
-            }
-        } else {
-            "N/A".to_string()
-        }
-    } else {
-        "N/A".to_string()
-    };
+    let (vram_pct, vram_detail, gpu_pct, available_devices_gpu) =
+        if let Some(nvml) = &nvml_instance {
+            let vram_pct = crate::utils::vram_utilization(nvml);
+            let vram_detail = nvml
+                .device_by_index(0)
+                .ok()
+                .and_then(|d| d.memory_info().ok())
+                .map(|mem| {
+                    let total = mem.total as f64 / (1024.0_f64.powi(3));
+                    let used = mem.used as f64 / (1024.0_f64.powi(3));
+                    format!("{:.1} / {:.1} GB", used, total)
+                })
+                .unwrap_or_else(|| "N/A".to_string());
 
-    let gpu_pct = gpu_utilization();
-    let gpu_detail = format!("{:.0}% utilization", gpu_pct);
+            let gpu_pct = crate::utils::gpu_utilization(nvml);
 
-    let mut available_devices: Vec<String> = Vec::new();
-    if let Some(nvml) = &nvml_instance {
-        if let Ok(count) = nvml.device_count() {
-            for i in 0..count {
-                if let Ok(device) = nvml.device_by_index(i) {
-                    if let Ok(name) = device.name() {
-                        available_devices.push(format!("CUDA:{} ({})", i, name));
+            let mut gpu_devices = Vec::new();
+            if let Ok(count) = nvml.device_count() {
+                for i in 0..count {
+                    if let Ok(device) = nvml.device_by_index(i) {
+                        if let Ok(name) = device.name() {
+                            gpu_devices.push(format!("CUDA:{} ({})", i, name));
+                        }
                     }
                 }
             }
-        }
-    }
+            (vram_pct, vram_detail, gpu_pct, gpu_devices)
+        } else {
+            (0.0, "N/A".to_string(), 0.0, Vec::new())
+        };
+
+    let gpu_detail = format!("{:.0}% utilization", gpu_pct);
+
+    let mut available_devices = available_devices_gpu;
     available_devices.push("CPU".to_string());
 
-    let cfg = state.config.lock().unwrap();
+    let cfg = state.config.lock().unwrap_or_else(|e| e.into_inner());
     let selected_device = if available_devices.contains(&cfg.config.inference_device) {
         cfg.config.inference_device.clone()
     } else {
@@ -250,81 +258,60 @@ async fn save_runtime_config(
     State(state): State<AppState>,
     Json(body): Json<SaveRuntimeConfigRequest>,
 ) -> Result<Json<&'static str>, (StatusCode, String)> {
-    let mut cfg = state.config.lock().unwrap();
+    let mut cfg = state.config.lock().unwrap_or_else(|e| e.into_inner());
     cfg.config.inference_device = body.inference_device;
     cfg.save().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     Ok(Json("ok"))
 }
 
+/// Returns `<exe_dir>/..`, the base directory where `skill/` and `tool/` folders live.
+fn skill_tool_base_dir() -> Option<std::path::PathBuf> {
+    std::env::current_exe().ok()?.parent()?.parent().map(|p| p.to_path_buf())
+}
+
 /// GET /api/skills
 async fn get_skills() -> Json<Vec<SkillToolItem>> {
-    Json(vec![
-        SkillToolItem {
-            id: "pathfinding".to_string(),
-            title: "Pathfinding".to_string(),
-            version: "1.2.0".to_string(),
-            description: "A* pathfinding with dynamic obstacle avoidance. Supports 3D navigation mesh traversal for complex terrain including water, lava, and scaffolding. Includes jump-sprint optimization and elytra flight paths.".to_string(),
-        },
-        SkillToolItem {
-            id: "building".to_string(),
-            title: "Building".to_string(),
-            version: "0.8.1".to_string(),
-            description: "Schematic-based building with automatic material gathering. Supports NBT structure files and litematica schematics. Includes scaffolding placement and block-by-block verification.".to_string(),
-        },
-        SkillToolItem {
-            id: "combat".to_string(),
-            title: "Combat".to_string(),
-            version: "1.0.3".to_string(),
-            description: "PvE combat with mob targeting, shield blocking, and bow aiming. Supports critical hits, sweep attacks, and potion usage. Includes flee behavior when health is low.".to_string(),
-        },
-        SkillToolItem {
-            id: "farming".to_string(),
-            title: "Farming".to_string(),
-            version: "1.1.0".to_string(),
-            description: "Automated crop farming with replanting. Supports wheat, carrots, potatoes, beetroot, and nether wart. Includes bone meal optimization and harvest timing.".to_string(),
-        },
-        SkillToolItem {
-            id: "mining".to_string(),
-            title: "Mining".to_string(),
-            version: "2.0.0".to_string(),
-            description: "Strip mining and branch mining with ore detection. Supports fortune and silk touch tool selection. Includes torch placement and lava/water hazard avoidance.".to_string(),
-        },
-    ])
+    let items = skill_tool_base_dir()
+        .map(|base| crate::utils::scan_skills(&base.join("skill")))
+        .unwrap_or_default();
+    Json(items)
 }
 
 /// GET /api/tools
 async fn get_tools() -> Json<Vec<SkillToolItem>> {
-    Json(vec![
-        SkillToolItem {
-            id: "chat".to_string(),
-            title: "Chat".to_string(),
-            version: "1.0.0".to_string(),
-            description: "Send and receive in-game chat messages. Supports whisper, party, and global channels. Includes message formatting and command execution.".to_string(),
-        },
-        SkillToolItem {
-            id: "inventory".to_string(),
-            title: "Inventory".to_string(),
-            version: "1.3.2".to_string(),
-            description: "Inspect and manage player inventory. Supports item sorting, crafting recipe lookup, and container interaction (chests, furnaces, brewing stands).".to_string(),
-        },
-        SkillToolItem {
-            id: "world".to_string(),
-            title: "World Info".to_string(),
-            version: "1.1.0".to_string(),
-            description: "Query world state including time, weather, biome, and nearby entities. Supports block scanning in a configurable radius and structure detection.".to_string(),
-        },
-        SkillToolItem {
-            id: "movement".to_string(),
-            title: "Movement".to_string(),
-            version: "0.9.5".to_string(),
-            description: "Low-level movement commands: walk, sprint, jump, sneak, swim. Supports coordinate-based movement and relative direction commands.".to_string(),
-        },
-    ])
+    let items = skill_tool_base_dir()
+        .map(|base| crate::utils::scan_tools(&base.join("tool")))
+        .unwrap_or_default();
+    Json(items)
+}
+
+/// POST /api/skills/{id}/toggle
+async fn toggle_skill_handler(
+    Path(id): Path<String>,
+    Json(body): Json<ToggleRequest>,
+) -> Result<Json<&'static str>, (StatusCode, String)> {
+    let base = skill_tool_base_dir()
+        .ok_or_else(|| (StatusCode::INTERNAL_SERVER_ERROR, "exe path error".to_string()))?;
+    crate::utils::toggle_skill(&base.join("skill"), &id, body.enabled)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(Json("ok"))
+}
+
+/// POST /api/tools/{id}/toggle
+async fn toggle_tool_handler(
+    Path(id): Path<String>,
+    Json(body): Json<ToggleRequest>,
+) -> Result<Json<&'static str>, (StatusCode, String)> {
+    let base = skill_tool_base_dir()
+        .ok_or_else(|| (StatusCode::INTERNAL_SERVER_ERROR, "exe path error".to_string()))?;
+    crate::utils::toggle_tool(&base.join("tool"), &id, body.enabled)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(Json("ok"))
 }
 
 /// GET /api/config — return current API configuration
 async fn get_config(State(state): State<AppState>) -> Json<ApiConfigData> {
-    let cfg = state.config.lock().unwrap();
+    let cfg = state.config.lock().unwrap_or_else(|e| e.into_inner());
     let api_config = &cfg.config.api_config;
     Json(ApiConfigData {
         accepted_ip_range: api_config.accepted_ip_range.clone(),
@@ -359,7 +346,7 @@ async fn save_config(
 
     // 2. Update and save config (lock released before step 3 to avoid deadlock)
     {
-        let mut cfg = state.config.lock().unwrap();
+        let mut cfg = state.config.lock().unwrap_or_else(|e| e.into_inner());
         cfg.config.api_config.accepted_ip_range = body.accepted_ip_range;
         cfg.config.api_config.port = body.port;
         cfg.save().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
@@ -376,7 +363,7 @@ async fn add_api_key(
     State(state): State<AppState>,
     Json(body): Json<AddApiKeyRequest>,
 ) -> Result<Json<&'static str>, (StatusCode, String)> {
-    let mut cfg = state.config.lock().unwrap();
+    let mut cfg = state.config.lock().unwrap_or_else(|e| e.into_inner());
     cfg.config.api_config.api_keys.push(crate::settings::ApiKey {
         name: body.name,
         key: body.key,
@@ -390,7 +377,7 @@ async fn delete_api_key(
     State(state): State<AppState>,
     Path(index): Path<usize>,
 ) -> Result<Json<&'static str>, (StatusCode, String)> {
-    let mut cfg = state.config.lock().unwrap();
+    let mut cfg = state.config.lock().unwrap_or_else(|e| e.into_inner());
     let keys = &mut cfg.config.api_config.api_keys;
     if index >= keys.len() {
         return Err((StatusCode::BAD_REQUEST, format!("index {index} out of range")));
@@ -401,21 +388,11 @@ async fn delete_api_key(
 }
 
 async fn load_model() -> Result<Json<&'static str>, (StatusCode, String)> {
-    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-    if rand::random::<bool>() {
-        Ok(Json("ok"))
-    } else {
-        Err((StatusCode::INTERNAL_SERVER_ERROR, "Failed to load model".to_string()))
-    }
+    Err((StatusCode::NOT_IMPLEMENTED, "model loading not yet implemented".to_string()))
 }
 
 async fn unload_model() -> Result<Json<&'static str>, (StatusCode, String)> {
-    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-    if rand::random::<bool>() {
-        Ok(Json("ok"))
-    } else {
-        Err((StatusCode::INTERNAL_SERVER_ERROR, "Failed to unload model".to_string()))
-    }
+    Err((StatusCode::NOT_IMPLEMENTED, "model unloading not yet implemented".to_string()))
 }
 
 /// Build the API router with all /api/* routes
@@ -431,7 +408,9 @@ pub fn router(config: SharedConfig, openai_server: SharedApiServer) -> Router {
         .route("/runtime", get(get_runtime))
         .route("/runtime/save", post(save_runtime_config))
         .route("/skills", get(get_skills))
+        .route("/skills/{id}/toggle", post(toggle_skill_handler))
         .route("/tools", get(get_tools))
+        .route("/tools/{id}/toggle", post(toggle_tool_handler))
         .route("/config", get(get_config))
         .route("/config/save", post(save_config))
         .route("/config/api-key", post(add_api_key))

@@ -21,7 +21,7 @@ const HARDCODED_REPLY: &str =
     "I am Open Crafter Engine. LLM integration is not yet available.";
 
 pub async fn list_models(State(config): State<SharedConfig>) -> impl IntoResponse {
-    let state = config.lock().unwrap();
+    let state = config.lock().unwrap_or_else(|e| e.into_inner());
     let model_path = state.config.model_path.clone();
     drop(state);
 
@@ -67,7 +67,7 @@ pub async fn retrieve_model(
     State(config): State<SharedConfig>,
     Path(model_id): Path<String>,
 ) -> impl IntoResponse {
-    let state = config.lock().unwrap();
+    let state = config.lock().unwrap_or_else(|e| e.into_inner());
     let model_path = state.config.model_path.clone();
     drop(state);
 

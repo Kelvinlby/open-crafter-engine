@@ -19,6 +19,13 @@ struct Args {
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
+
     let args = Args::parse();
 
     let exe_dir = std::env::current_exe()
@@ -30,7 +37,7 @@ async fn main() {
     let web_ui_dir = exe_dir.join("web-ui");
 
     if !web_ui_dir.exists() {
-        eprintln!("Web UI directory not found at: {}", web_ui_dir.display());
+        tracing::error!("Web UI directory not found at: {}", web_ui_dir.display());
         std::process::exit(1);
     }
 

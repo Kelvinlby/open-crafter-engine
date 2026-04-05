@@ -130,12 +130,12 @@ pub fn load(exe_dir: &Path) -> SharedConfig {
         Ok(content) => match serde_json::from_str::<AppConfig>(&content) {
             Ok(cfg) => cfg.validate(&available_devices),
             Err(e) => {
-                eprintln!("settings: engine config is malformed ({e}), using defaults");
+                tracing::warn!("settings: engine config is malformed ({e}), using defaults");
                 AppConfig::default_with_devices(&available_devices)
             }
         },
         Err(_) => {
-            println!("settings: no engine config found, creating defaults");
+            tracing::info!("settings: no engine config found, creating defaults");
             AppConfig::default_with_devices(&available_devices)
         }
     };
@@ -147,7 +147,7 @@ pub fn load(exe_dir: &Path) -> SharedConfig {
 
     // Persist the (possibly corrected) config
     if let Err(e) = state.save() {
-        eprintln!("settings: failed to save config: {e}");
+        tracing::error!("settings: failed to save config: {e}");
     }
 
     Arc::new(Mutex::new(state))

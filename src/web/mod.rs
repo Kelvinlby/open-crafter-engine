@@ -31,7 +31,7 @@ pub async fn start_server(
         .await
         .expect("failed to bind");
 
-    println!("Web UI serving at http://{addr}");
+    tracing::info!("Web UI serving at http://{addr}");
 
     axum::serve(listener, app).await.expect("server error");
 }

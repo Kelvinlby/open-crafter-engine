@@ -59,6 +59,13 @@ pub struct SkillToolItem {
     pub title: String,
     pub version: String,
     pub description: String,
+    pub enabled: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToggleRequest {
+    pub enabled: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone)]

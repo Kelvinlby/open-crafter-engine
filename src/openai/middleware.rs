@@ -16,7 +16,7 @@ pub async fn ip_filter_middleware(
     next: Next,
 ) -> Result<Response, StatusCode> {
     let cidr: IpNet = {
-        let state = config.lock().unwrap();
+        let state = config.lock().unwrap_or_else(|e| e.into_inner());
         state
             .config
             .api_config
@@ -50,7 +50,7 @@ pub async fn auth_middleware(
         .unwrap_or("");
 
     let valid = {
-        let state = config.lock().unwrap();
+        let state = config.lock().unwrap_or_else(|e| e.into_inner());
         state
             .config
             .api_config
