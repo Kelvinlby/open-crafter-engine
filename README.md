@@ -8,6 +8,14 @@
 
 </div>
 
+# Architecture overview
+
+Open Crafter has three components:
+
+- **Mod** — Fabric client mod. Runs inside Minecraft, hosts a Unix domain socket server, and exposes game state/actions to the engine via JSON-RPC.
+- **Engine** (this repo) — Rust backend that drives the AI model and issues commands over the socket.
+- **Web UI** — Frontend panel, opened in-game via the mod's embedded browser.
+
 # Configuration
 
 The engine stores its configuration in `engine-config.json`, located one directory above the binary (`../engine-config.json` relative to the executable). The file is created with defaults on first run and can be updated at runtime via `POST /api/config/save` on the Control Panel (see below), which also restarts the OpenAI API server to apply the new settings.
