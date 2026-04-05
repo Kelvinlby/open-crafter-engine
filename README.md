@@ -30,6 +30,7 @@ CIDR notation string controlling which client IPs are allowed to reach the OpenA
 | `::/0` | Allow all IPv6 addresses |
 | `192.168.1.0/24` | Allow only the `192.168.1.x` subnet |
 | `10.0.0.0/8` | Allow the entire RFC-1918 private range |
+| `100.64.0.0/10` | Allow only Tailscale peers (CGNAT range) |
 
 IPv4-mapped IPv6 addresses (e.g. `::ffff:192.168.1.5`) are automatically unwrapped before matching, so an IPv4 CIDR correctly matches clients connecting over a dual-stack socket.
 
