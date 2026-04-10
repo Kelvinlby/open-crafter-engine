@@ -1,7 +1,9 @@
-<h1 align="center">Open Crafter Engine</h1>
-<h3 align="center">Inference engine backend.</h3>
-
 <div align="center">
+
+<img width="607" height="121" alt="open-crafter-engine" src="https://github.com/user-attachments/assets/ff1d24bf-7360-4244-b461-6f599cca20c6" />
+
+</br>
+</br>
 
 [![mod](https://img.shields.io/static/v1?label=Github&message=open-crafter&color=white&logo=github&style=for-the-badge)](https://github.com/Kelvinlby/open-crafter)
 [![discord](https://img.shields.io/static/v1?label=Discord&message=Chat&color=7289DA&logo=discord&style=for-the-badge)](https://discord.gg/FjRpnp3S8z)
